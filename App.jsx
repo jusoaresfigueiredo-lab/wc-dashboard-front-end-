@@ -1,0 +1,556 @@
+import { useState, useEffect, useCallback } from "react";
+
+// ─── Point this at your deployed backend URL ──────────────────────────────────
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+
+// ─── Brand ────────────────────────────────────────────────────────────────────
+const C = {
+  forest: "#002311", mint: "#3cae78", sage: "#c3dfb4",
+  cream: "#f4f0e8", sand: "#ede8de", paper: "#f9f6f1",
+  white: "#ffffff", muted: "#6b7c6b", border: "#c3dfb450",
+};
+
+const WEEK = "April 30 – May 6, 2025";
+
+const TEAM = [
+  { id: "julia_f", name: "Julia F",  initials: "JF" },
+  { id: "julia_v", name: "Julia V",  initials: "JV" },
+  { id: "julie",   name: "Julie",    initials: "JL" },
+  { id: "ana",     name: "Ana",      initials: "AN" },
+  { id: "jeanine", name: "Jeanine",  initials: "JN" },
+  { id: "sumit",   name: "Sumit",    initials: "SU" },
+  { id: "gul",     name: "Gül",      initials: "GÜ" },
+  { id: "barbara", name: "Barbara",  initials: "BA" },
+];
+
+const STATUS_S = {
+  "On Track": { bg: "#eaf7f0", text: "#1a6e42", border: "#a0d8bb" },
+  "At Risk":  { bg: "#fdf6e3", text: "#8a6000", border: "#dfc870" },
+  "Blocked":  { bg: "#fdf0ee", text: "#982818", border: "#edaaa0" },
+  "Done":     { bg: "#f0f7ed", text: "#2e5e26", border: "#b0d8a8" },
+};
+const THREAD_S = {
+  ongoing:  { bg: "#eaf7f0", text: "#1a6e42", border: "#a0d8bb" },
+  waiting:  { bg: "#fdf6e3", text: "#8a6000", border: "#dfc870" },
+  resolved: { bg: "#f0f7ed", text: "#2e5e26", border: "#b0d8a8" },
+};
+
+// ─── Micro components ─────────────────────────────────────────────────────────
+function Badge({ label, s }) {
+  const st = s || { bg: C.cream, text: C.muted, border: C.border };
+  return (
+    <span style={{
+      fontSize: 9.5, letterSpacing: "0.09em", textTransform: "uppercase",
+      fontFamily: "Raleway, sans-serif", fontWeight: 700,
+      background: st.bg, color: st.text, border: `1px solid ${st.border}`,
+      padding: "2px 8px", borderRadius: 2, whiteSpace: "nowrap", flexShrink: 0,
+    }}>{label}</span>
+  );
+}
+
+function StatBox({ value, label, accent = C.mint }) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      padding: "10px 18px", background: C.paper,
+      border: `1px solid ${C.border}`, borderRadius: 3, minWidth: 80,
+    }}>
+      <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 800, fontSize: 28, color: accent, lineHeight: 1 }}>{value ?? "—"}</span>
+      <span style={{ fontSize: 9.5, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 5, fontFamily: "Raleway, sans-serif" }}>{label}</span>
+    </div>
+  );
+}
+
+function Skeleton({ rows = 4 }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{
+          height: 11, borderRadius: 3, width: `${[88, 68, 78, 55, 82][i % 5]}%`,
+          background: "linear-gradient(90deg,#c3dfb428 25%,#c3dfb414 50%,#c3dfb428 75%)",
+          backgroundSize: "200% 100%",
+          animation: `shimmer 1.6s ease infinite`,
+          animationDelay: `${i * 0.1}s`,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+function ItemCard({ children, delay = 0 }) {
+  return (
+    <div style={{
+      padding: "10px 13px", borderRadius: 2,
+      background: C.cream, border: `1px solid #c3dfb432`,
+      display: "flex", flexDirection: "column", gap: 5,
+      animation: `fadeUp 0.3s ease both`, animationDelay: `${delay}s`,
+    }}>{children}</div>
+  );
+}
+
+function Label({ children, color = C.muted }) {
+  return <span style={{ fontSize: 10, color, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{children}</span>;
+}
+
+function Body({ children }) {
+  return <p style={{ margin: 0, fontSize: 11.5, color: "#485848", lineHeight: 1.6, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>{children}</p>;
+}
+
+function Title({ children }) {
+  return <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 600, fontSize: 12, color: C.forest }}>{children}</span>;
+}
+
+function Summary({ text, accent }) {
+  return (
+    <p style={{
+      margin: "0 0 12px", fontSize: 12.5, color: C.muted, lineHeight: 1.65, fontStyle: "italic",
+      borderLeft: `2px solid ${accent}60`, paddingLeft: 10,
+      fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
+    }}>{text}</p>
+  );
+}
+
+function Panel({ title, sub, accent = C.mint, badge, loading, error, onRefresh, children, fullWidth }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: C.white, borderRadius: 3, overflow: "hidden",
+        border: `1px solid ${hov ? "#3cae7850" : C.border}`,
+        boxShadow: hov ? "0 4px 20px rgba(0,35,17,0.10)" : "0 1px 4px rgba(0,35,17,0.05)",
+        display: "flex", flexDirection: "column",
+        transition: "box-shadow 0.22s, border-color 0.22s",
+        gridColumn: fullWidth ? "1 / -1" : undefined,
+      }}
+    >
+      <div style={{ height: 3, background: accent }} />
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "13px 20px 10px", borderBottom: `1px solid #c3dfb428`, background: C.paper,
+      }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <p style={{ margin: 0, fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 11.5, color: C.forest, letterSpacing: "0.14em", textTransform: "uppercase" }}>{title}</p>
+            {badge && <Badge label={badge.label} s={badge.s} />}
+          </div>
+          {sub && <p style={{ margin: "3px 0 0", fontSize: 10, color: C.muted, letterSpacing: "0.04em" }}>{sub}</p>}
+        </div>
+        <button onClick={onRefresh} disabled={loading} style={{
+          background: "none", border: `1px solid #c3dfb465`, borderRadius: 2,
+          color: C.muted, cursor: "pointer", padding: "4px 11px", fontSize: 12,
+          transition: "all 0.18s", opacity: loading ? 0.4 : 1, fontFamily: "Raleway, sans-serif",
+        }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = C.mint; e.currentTarget.style.color = C.mint; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#c3dfb465"; e.currentTarget.style.color = C.muted; }}
+        >{loading ? "···" : "↻"}</button>
+      </div>
+      <div style={{ padding: "15px 20px 20px", flex: 1 }}>
+        {loading && <Skeleton />}
+        {error && !loading && (
+          <p style={{ margin: 0, fontSize: 12, color: "#b83224", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>⚠ {error}</p>
+        )}
+        {!loading && !error && children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Connect page ─────────────────────────────────────────────────────────────
+function ConnectPage({ onConnected }) {
+  const [selected, setSelected] = useState(null);
+  const [status,   setStatus]   = useState({});
+
+  const checkStatus = useCallback(async (userId) => {
+    try {
+      const res = await fetch(`${BACKEND}/status/${userId}`);
+      const d   = await res.json();
+      setStatus(d);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    // Check URL params for OAuth callback
+    const params = new URLSearchParams(window.location.search);
+    const success = params.get("success");
+    const user    = params.get("user");
+    if (success && user) {
+      setSelected(user);
+      checkStatus(user);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [checkStatus]);
+
+  useEffect(() => {
+    if (selected) checkStatus(selected);
+  }, [selected, checkStatus]);
+
+  const isReady = status.hasGoogle && status.hasMonday;
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.sand, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <div style={{ maxWidth: 480, width: "100%" }}>
+        <div style={{ background: C.forest, padding: "18px 24px", borderRadius: "3px 3px 0 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 800, fontSize: 13, letterSpacing: "0.2em", color: C.white, textTransform: "uppercase" }}>World Collective</span>
+          <span style={{ fontFamily: "Raleway, sans-serif", fontSize: 10, color: "#c3dfb470", letterSpacing: "0.14em", textTransform: "uppercase" }}>Weekly Dashboard</span>
+        </div>
+
+        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderTop: "none", borderRadius: "0 0 3px 3px", padding: 28 }}>
+          <p style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 15, color: C.forest, margin: "0 0 4px" }}>Connect your account</p>
+          <p style={{ fontSize: 12, color: C.muted, margin: "0 0 24px", lineHeight: 1.6, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+            Select your name, then connect Google and monday.com. This only takes a minute and only needs to be done once.
+          </p>
+
+          {/* Step 1: Pick name */}
+          <div style={{ marginBottom: 20 }}>
+            <Label>Step 1 — Who are you?</Label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
+              {TEAM.map(m => (
+                <button key={m.id} onClick={() => setSelected(m.id)} style={{
+                  padding: "6px 14px", borderRadius: 2, cursor: "pointer",
+                  fontFamily: "Raleway, sans-serif", fontWeight: 600, fontSize: 11,
+                  border: `1px solid ${selected === m.id ? C.mint : "#c3dfb475"}`,
+                  background: selected === m.id ? "#eaf7f0" : C.white,
+                  color: selected === m.id ? "#1a6e42" : C.forest,
+                  transition: "all 0.15s",
+                }}>{m.name}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 2: Connect */}
+          {selected && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+              <Label>Step 2 — Connect your accounts</Label>
+
+              <a href={`${BACKEND}/auth/google?userId=${selected}`} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 16px", borderRadius: 2, textDecoration: "none",
+                background: status.hasGoogle ? "#eaf7f0" : C.paper,
+                border: `1px solid ${status.hasGoogle ? "#a0d8bb" : C.border}`,
+                marginTop: 8,
+              }}>
+                <div>
+                  <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 12, color: C.forest }}>Google (Gmail + Calendar + Drive)</span>
+                  <p style={{ margin: "3px 0 0", fontSize: 10, color: C.muted }}>Reads your email threads, meetings, and shared files</p>
+                </div>
+                <span style={{ fontSize: 12, fontFamily: "Raleway, sans-serif", fontWeight: 700, color: status.hasGoogle ? "#1a6e42" : C.mint }}>
+                  {status.hasGoogle ? "✓ Connected" : "Connect →"}
+                </span>
+              </a>
+
+              <a href={`${BACKEND}/auth/monday?userId=${selected}`} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 16px", borderRadius: 2, textDecoration: "none",
+                background: status.hasMonday ? "#eaf7f0" : C.paper,
+                border: `1px solid ${status.hasMonday ? "#a0d8bb" : C.border}`,
+              }}>
+                <div>
+                  <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 12, color: C.forest }}>monday.com</span>
+                  <p style={{ margin: "3px 0 0", fontSize: 10, color: C.muted }}>Reads shared boards and project updates</p>
+                </div>
+                <span style={{ fontSize: 12, fontFamily: "Raleway, sans-serif", fontWeight: 700, color: status.hasMonday ? "#1a6e42" : C.mint }}>
+                  {status.hasMonday ? "✓ Connected" : "Connect →"}
+                </span>
+              </a>
+            </div>
+          )}
+
+          {isReady && (
+            <button onClick={onConnected} style={{
+              width: "100%", padding: "12px", background: C.forest, border: "none",
+              borderRadius: 2, color: C.white, cursor: "pointer",
+              fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 12,
+              letterSpacing: "0.12em", textTransform: "uppercase",
+            }}>Open Dashboard →</button>
+          )}
+
+          {selected && !isReady && (
+            <p style={{ margin: 0, fontSize: 11, color: C.muted, textAlign: "center", fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+              Connect both accounts above to continue
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard panels ─────────────────────────────────────────────────────────
+function MyWeekPanel({ userId, data, loading, error, onRefresh }) {
+  return (
+    <Panel title="My Week" sub={`Gmail + Calendar · ${WEEK}`} accent={C.mint}
+      badge={{ label: "Personal", s: { bg: C.cream, text: C.muted, border: "#d0c8b8" } }}
+      loading={loading} error={error} onRefresh={onRefresh}>
+      {data && <>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          <StatBox value={data.emailsReceived} label="Received" />
+          <StatBox value={data.emailsSent}     label="Sent" />
+          <StatBox value={data.meetingsCount}  label="Meetings" accent="#7aaa6a" />
+        </div>
+        {data.highlight && (
+          <div style={{ padding: "10px 14px", background: "#eaf7f0", border: "1px solid #a0d8bb", borderRadius: 2, marginBottom: 14 }}>
+            <Label color={C.mint}>Week highlight</Label>
+            <Body>{data.highlight}</Body>
+          </div>
+        )}
+        {data.topThreads?.length > 0 && <>
+          <Label>Top email threads</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6, marginBottom: 14 }}>
+            {data.topThreads.map((t, i) => (
+              <ItemCard key={i} delay={i * 0.05}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Title>{t.subject}</Title>
+                  <Badge label={t.status} s={THREAD_S[t.status]} />
+                </div>
+                <Label>with {t.counterpart}</Label>
+              </ItemCard>
+            ))}
+          </div>
+        </>}
+        {data.meetings?.length > 0 && <>
+          <Label>Meetings this week</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
+            {data.meetings.map((m, i) => (
+              <ItemCard key={i} delay={i * 0.05}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 10, color: C.mint, minWidth: 30 }}>{m.day}</span>
+                  <Title>{m.title}</Title>
+                </div>
+                <Label>{m.attendees}</Label>
+              </ItemCard>
+            ))}
+          </div>
+        </>}
+      </>}
+    </Panel>
+  );
+}
+
+function TeamProjectsPanel({ data, loading, error, onRefresh }) {
+  return (
+    <Panel title="Team Projects" sub={`monday.com · All boards · ${WEEK}`} accent={C.mint}
+      badge={{ label: "Shared Team", s: { bg: "#eaf7f0", text: C.mint, border: "#a0d8bb" } }}
+      loading={loading} error={error} onRefresh={onRefresh}>
+      {data && <>
+        {data.summary && <Summary text={data.summary} accent={C.mint} />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {data.projects?.map((p, i) => (
+            <ItemCard key={i} delay={i * 0.05}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Title>{p.name}</Title>
+                <Badge label={p.status} s={STATUS_S[p.status]} />
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <Label>Owner: <strong style={{ color: C.forest }}>{p.owner}</strong></Label>
+                {p.updatedBy && p.updatedBy !== p.owner && <Label>Updated by: <strong style={{ color: C.forest }}>{p.updatedBy}</strong></Label>}
+              </div>
+              <Body>{p.update}</Body>
+            </ItemCard>
+          ))}
+        </div>
+      </>}
+    </Panel>
+  );
+}
+
+function TeamFilesPanel({ data, loading, error, onRefresh }) {
+  const typeColor = { Doc: C.mint, Sheet: "#2e7d52", Slide: "#b07318", PDF: "#982818", Other: C.muted };
+  return (
+    <Panel title="Team Files" sub={`Google Drive · Shared folders · ${WEEK}`} accent={C.sage}
+      badge={{ label: "Shared Team", s: { bg: "#eaf7f0", text: C.mint, border: "#a0d8bb" } }}
+      loading={loading} error={error} onRefresh={onRefresh}>
+      {data && <>
+        {data.summary && <Summary text={data.summary} accent={C.sage} />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {data.files?.map((f, i) => (
+            <ItemCard key={i} delay={i * 0.05}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 9.5, color: typeColor[f.type] || C.muted, minWidth: 28 }}>{f.type}</span>
+                <Title>{f.name}</Title>
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <Label color={C.mint}><strong>{f.day}</strong></Label>
+                <Label>by {f.editedBy}</Label>
+              </div>
+              <Label>{f.topic}</Label>
+            </ItemCard>
+          ))}
+        </div>
+      </>}
+    </Panel>
+  );
+}
+
+function AISummaryPanel({ data, loading, error, onRefresh }) {
+  return (
+    <Panel title="Weekly AI Debrief" sub={`All sources · ${WEEK} · Generated by Claude`}
+      accent={C.forest} badge={{ label: "Full Team", s: { bg: "#eaf7f0", text: C.mint, border: "#a0d8bb" } }}
+      loading={loading} error={error} onRefresh={onRefresh} fullWidth>
+      {data && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <p style={{ margin: 0, fontFamily: "Raleway, sans-serif", fontWeight: 800, fontSize: 20, color: C.forest, textAlign: "center", lineHeight: 1.3, padding: "6px 0" }}>{data.headline}</p>
+          <p style={{ margin: 0, fontSize: 13, color: "#3a4e3a", lineHeight: 1.75, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif", borderLeft: `3px solid ${C.mint}`, paddingLeft: 14 }}>{data.overview}</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+            <div style={{ background: "#eaf7f0", border: "1px solid #a0d8bb", borderRadius: 3, padding: "14px 16px" }}>
+              <p style={{ margin: "0 0 10px", fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 10.5, color: "#1a6e42", letterSpacing: "0.14em", textTransform: "uppercase" }}>✓ Wins this week</p>
+              {data.wins?.map((w, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}><span style={{ color: C.mint, fontWeight: 700 }}>·</span><Body>{w}</Body></div>)}
+            </div>
+            <div style={{ background: "#fdf6e3", border: "1px solid #dfc870", borderRadius: 3, padding: "14px 16px" }}>
+              <p style={{ margin: "0 0 10px", fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 10.5, color: "#8a6000", letterSpacing: "0.14em", textTransform: "uppercase" }}>⚠ Watch items</p>
+              {data.watchItems?.map((w, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}><span style={{ color: "#b07318", fontWeight: 700 }}>·</span><Body>{w}</Body></div>)}
+            </div>
+            <div style={{ background: C.paper, border: `1px solid ${C.border}`, borderRadius: 3, padding: "14px 16px" }}>
+              <p style={{ margin: "0 0 10px", fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 10.5, color: C.forest, letterSpacing: "0.14em", textTransform: "uppercase" }}>→ Week of May 7</p>
+              <Body>{data.nextWeek}</Body>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [page,      setPage]      = useState("connect"); // "connect" | "dashboard"
+  const [userId,    setUserId]    = useState(null);
+  const [myWeek,    setMyWeek]    = useState(null);
+  const [projects,  setProjects]  = useState(null);
+  const [files,     setFiles]     = useState(null);
+  const [summary,   setSummary]   = useState(null);
+  const [loading,   setLoading]   = useState({});
+  const [errors,    setErrors]    = useState({});
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [allLoading,  setAllLoading]  = useState(false);
+
+  // Detect returning from OAuth
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const u = params.get("user");
+    if (u) { setUserId(u); setPage("connect"); }
+  }, []);
+
+  const fetch1 = useCallback(async (key, url, setter) => {
+    setLoading(l => ({ ...l, [key]: true }));
+    setErrors(e  => ({ ...e,  [key]: null  }));
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed");
+      setter(await res.json());
+    } catch (err) {
+      setErrors(e => ({ ...e, [key]: err.message }));
+    } finally {
+      setLoading(l => ({ ...l, [key]: false }));
+    }
+  }, []);
+
+  const fetchAll = useCallback(async (uid) => {
+    const id = uid || userId;
+    setAllLoading(true);
+    await Promise.all([
+      fetch1("myWeek",   `${BACKEND}/data/my-week/${id}`,   setMyWeek),
+      fetch1("projects", `${BACKEND}/data/team-projects`,   setProjects),
+      fetch1("files",    `${BACKEND}/data/team-files`,      setFiles),
+      fetch1("summary",  `${BACKEND}/data/ai-summary`,      setSummary),
+    ]);
+    setLastRefresh(new Date());
+    setAllLoading(false);
+  }, [fetch1, userId]);
+
+  const handleConnected = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    const uid = params.get("user") || userId;
+    setUserId(uid);
+    setPage("dashboard");
+    fetchAll(uid);
+  }, [userId, fetchAll]);
+
+  const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+  if (page === "connect") return <ConnectPage onConnected={handleConnected} />;
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.sand, fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800&display=swap');
+        * { box-sizing: border-box; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        ::-webkit-scrollbar{width:5px}
+        ::-webkit-scrollbar-track{background:${C.sand}}
+        ::-webkit-scrollbar-thumb{background:#c3dfb4;border-radius:3px}
+      `}</style>
+
+      {/* Nav */}
+      <div style={{ background: C.forest, height: 54, position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 32px", borderBottom: "2px solid #3cae7818" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 800, fontSize: 14, letterSpacing: "0.22em", color: C.white, textTransform: "uppercase" }}>World Collective</span>
+          <span style={{ width: 1, height: 16, background: "#ffffff22" }} />
+          <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 400, fontSize: 10.5, letterSpacing: "0.18em", color: "#c3dfb470", textTransform: "uppercase" }}>Weekly Team View</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.mint, display: "inline-block", animation: "livePulse 2.5s ease-in-out infinite" }} />
+            <span style={{ fontSize: 10, letterSpacing: "0.16em", color: C.mint, fontWeight: 700, fontFamily: "Raleway, sans-serif" }}>LIVE</span>
+          </div>
+          <button onClick={() => setPage("connect")} style={{ background: "none", border: "1px solid #ffffff20", borderRadius: 2, color: "#ffffff60", cursor: "pointer", padding: "4px 12px", fontSize: 10, fontFamily: "Raleway, sans-serif", letterSpacing: "0.1em" }}>
+            Switch user
+          </button>
+          <span style={{ fontSize: 11, color: "#ffffff35" }}>{timeStr}</span>
+        </div>
+      </div>
+
+      {/* Sub-bar */}
+      <div style={{ background: "#e8e2d8", borderBottom: `1px solid #c3dfb455`, padding: "11px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "Raleway, sans-serif", fontWeight: 700, fontSize: 11.5, color: C.forest }}>{WEEK}</span>
+          <span style={{ width: 1, height: 13, background: "#c3dfb468" }} />
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {TEAM.map((m, i) => (
+              <span key={m.id} style={{
+                padding: "3px 11px", border: `1px solid ${m.id === userId ? C.mint : "#c3dfb475"}`,
+                background: m.id === userId ? "#eaf7f0" : C.white, borderRadius: 2,
+                fontFamily: "Raleway, sans-serif", fontWeight: m.id === userId ? 700 : 500, fontSize: 11,
+                color: m.id === userId ? "#1a6e42" : C.forest,
+                animation: `fadeUp 0.28s ease both`, animationDelay: `${i * 0.04}s`,
+              }}>{m.name}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {lastRefresh && <span style={{ fontSize: 10, color: C.muted }}>Updated {lastRefresh.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>}
+          <button onClick={() => fetchAll()} disabled={allLoading} style={{
+            background: C.forest, border: "none", borderRadius: 2, color: C.white,
+            cursor: "pointer", padding: "7px 18px", fontFamily: "Raleway, sans-serif",
+            fontWeight: 700, fontSize: 11, letterSpacing: "0.13em", textTransform: "uppercase",
+            opacity: allLoading ? 0.5 : 1, transition: "opacity 0.2s",
+          }}>{allLoading ? "Loading…" : "↻ Refresh"}</button>
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div style={{ maxWidth: 1220, margin: "0 auto", padding: "24px 24px 52px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(500px, 1fr))", gap: 18 }}>
+        <AISummaryPanel  data={summary}  loading={loading.summary}  error={errors.summary}  onRefresh={() => fetch1("summary",  `${BACKEND}/data/ai-summary`,      setSummary)} />
+        <MyWeekPanel     userId={userId} data={myWeek}   loading={loading.myWeek}   error={errors.myWeek}   onRefresh={() => fetch1("myWeek",   `${BACKEND}/data/my-week/${userId}`, setMyWeek)} />
+        <TeamProjectsPanel data={projects} loading={loading.projects} error={errors.projects} onRefresh={() => fetch1("projects", `${BACKEND}/data/team-projects`,   setProjects)} />
+        <TeamFilesPanel  data={files}    loading={loading.files}    error={errors.files}    onRefresh={() => fetch1("files",    `${BACKEND}/data/team-files`,       setFiles)} />
+      </div>
+
+      {/* Footer */}
+      <div style={{ background: C.forest, padding: "13px 32px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <span style={{ fontSize: 10, color: "#c3dfb450", letterSpacing: "0.09em", fontFamily: "Raleway, sans-serif" }}>© World Collective · Powered by Anthropic · {WEEK}</span>
+        <div style={{ display: "flex", gap: 18 }}>
+          {["Gmail", "Calendar", "monday.com", "Drive"].map(l => (
+            <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.mint, opacity: 0.5, display: "inline-block" }} />
+              <span style={{ fontSize: 10, color: "#c3dfb450", fontFamily: "Raleway, sans-serif" }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
