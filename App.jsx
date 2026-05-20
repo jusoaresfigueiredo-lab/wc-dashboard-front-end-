@@ -10,7 +10,7 @@ const C = {
   white: "#ffffff", muted: "#6b7c6b", border: "#c3dfb450",
 };
 
-const WEEK = "April 30 – May 6, 2025";
+const WEEK = "May 13 – May 19, 2026";
 
 const TEAM = [
   { id: "julia_f", name: "Julia F",  initials: "JF" },
